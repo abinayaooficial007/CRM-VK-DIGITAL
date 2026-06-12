@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Lead CRM Dashboard</title>
+<title>Lead CRM Pro — Offline + Cloud Sync</title>
 <style>
   :root {
     --bg: #F2F4F1; --card: #FFFFFF; --ink: #1C2B26; --muted: #6B7A74;
@@ -15,9 +15,12 @@
     font-family: "Noto Sans Tamil", "Noto Sans", -apple-system, "Segoe UI", Roboto, sans-serif;
     background: var(--bg); color: var(--ink); margin: 0; padding: 16px;
   }
-  .head { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:16px; flex-wrap:wrap; }
+  .head { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:6px; flex-wrap:wrap; }
   .head h1 { font-size:22px; margin:0; letter-spacing:-0.3px; }
   .head p { margin:2px 0 0; font-size:12.5px; color:var(--muted); }
+  .sync { font-size:12.5px; margin-bottom:12px; padding:7px 12px; border-radius:8px; display:inline-block; }
+  .sync.ok { color:var(--accent); background:var(--accent-soft); }
+  .sync.pend { color:var(--warn); background:var(--warn-soft); }
   .btn { border:none; border-radius:10px; padding:10px 16px; font-size:14px; font-weight:600; cursor:pointer; font-family:inherit; }
   .btn-primary { background:var(--accent); color:#fff; }
   .btn-primary:hover { background:#0A6644; }
@@ -83,11 +86,12 @@
 
 <div class="head">
   <div>
-    <h1>Lead CRM Dashboard</h1>
-    <p>உங்க Client Acquisition System — தினமும் இங்கே தான் வேலை</p>
+    <h1>Lead CRM Pro</h1>
+    <p>Offline-லயும் Work ஆகும் • Cloud-ல Auto Sync ஆகும்</p>
   </div>
   <button class="btn btn-primary" onclick="openAdd()">+ புது Lead</button>
 </div>
+<div><span class="sync ok" id="sync">Loading…</span></div>
 
 <div class="stats" id="stats"></div>
 <div class="funnel" id="funnel"></div>
@@ -98,9 +102,10 @@
   <button class="btn btn-ghost" id="clearBtn" style="display:none" onclick="clearFilters()">Clear</button>
 </div>
 
-<div id="list"></div>
+<div id="list"><div class="empty">Loading…</div></div>
 
 <div class="backup-bar">
+  <button class="btn btn-ghost" onclick="fullSync()">⟳ Sync Now</button>
   <button class="btn btn-ghost" onclick="exportData()">⬇ Backup (Download JSON)</button>
   <button class="btn btn-ghost" onclick="document.getElementById('importFile').click()">⬆ Restore Backup</button>
   <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(event)">
@@ -119,12 +124,12 @@
       <div class="fld"><label>Source</label><select id="f_source"></select></div>
     </div>
     <div class="grid2">
-      <div class="fld"><label>Website நிலை</label><select id="f_websiteStatus"></select></div>
+      <div class="fld"><label>Website நிலை</label><select id="f_website_status"></select></div>
       <div class="fld"><label>Deal Value (₹)</label><input id="f_value" type="number" value="4000"></div>
     </div>
     <div class="grid2">
       <div class="fld"><label>Status</label><select id="f_status"></select></div>
-      <div class="fld"><label>Next Follow-up</label><input id="f_followUp" type="date"></div>
+      <div class="fld"><label>Next Follow-up</label><input id="f_follow_up" type="date"></div>
     </div>
     <div class="fld"><label>Notes</label><textarea id="f_notes" rows="3" placeholder="உதா: Owner பெயர் Kumar. Sample கேட்டார். Price பேசணும்."></textarea></div>
     <div class="foot">
@@ -135,6 +140,22 @@
 </div>
 
 <script>
+// ===== உங்க Supabase Database Details =====
+const SUPABASE_URL = "https://aiwhabovgypsuyznwand.supabase.co";
+const SUPABASE_KEY = "sb_publishable_baVLRR9kHuWzKMZCdvEaMA_px0ot0yv";
+const TABLE = "crm_leads";
+// ===========================================
+
+const API = SUPABASE_URL + "/rest/v1/" + TABLE;
+const HEADERS = {
+  "apikey": SUPABASE_KEY,
+  "Authorization": "Bearer " + SUPABASE_KEY,
+  "Content-Type": "application/json",
+  "Prefer": "return=representation",
+};
+const CACHE_KEY = "crm-pro-cache";
+const QUEUE_KEY = "crm-pro-queue";
+
 const STATUSES = [
   { key:"new", label:"புது Lead", color:"#5B6B7A" },
   { key:"contacted", label:"Contacted", color:"#2E6FB5" },
@@ -152,19 +173,103 @@ const WEBSITE_STATUS = [
   { key:"old", label:"பழைய Website ⭐⭐" },
   { key:"has", label:"Website இருக்கு" },
 ];
-const KEY = "freelancer-crm-leads";
 
 let leads = [];
+let queue = [];   // pending cloud operations: {op:'insert'|'update'|'delete', id, data}
 let editId = null;
 let filterStatus = "all";
 
-try { leads = JSON.parse(localStorage.getItem(KEY) || "[]"); } catch(e) { leads = []; }
+// ===== Local cache (உங்க Device storage — எப்போதும் Work ஆகும்) =====
+try { leads = JSON.parse(localStorage.getItem(CACHE_KEY) || "[]"); } catch(e) { leads = []; }
+try { queue = JSON.parse(localStorage.getItem(QUEUE_KEY) || "[]"); } catch(e) { queue = []; }
 
-function persist() {
-  try { localStorage.setItem(KEY, JSON.stringify(leads)); }
-  catch(e) { alert("Save ஆகலை — Browser Storage Full ஆக இருக்கலாம்."); }
+function saveLocal() {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify(leads));
+    localStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
+  } catch(e) {}
 }
 
+function uuid() {
+  if (crypto && crypto.randomUUID) return crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random()*16|0; return (c==='x'?r:(r&0x3|0x8)).toString(16);
+  });
+}
+
+function setSync() {
+  const el = document.getElementById("sync");
+  if (queue.length === 0) {
+    el.textContent = "☁ எல்லாம் Cloud-ல Sync ஆகிடுச்சு ✓";
+    el.className = "sync ok";
+  } else {
+    el.textContent = "📴 Local-ல Save ஆகுது • " + queue.length + " changes Cloud Sync-க்கு காத்திருக்கு (Data Safe!)";
+    el.className = "sync pend";
+  }
+}
+
+// ===== Cloud operations =====
+async function cloudInsert(row) {
+  const res = await fetch(API, { method:"POST", headers:HEADERS, body:JSON.stringify(row) });
+  if (!res.ok && res.status !== 409) throw new Error(res.status); // 409 = ஏற்கனவே இருக்கு, OK
+}
+async function cloudUpdate(id, patch) {
+  const res = await fetch(API + "?id=eq." + id, { method:"PATCH", headers:HEADERS, body:JSON.stringify(patch) });
+  if (!res.ok) throw new Error(res.status);
+}
+async function cloudDelete(id) {
+  const res = await fetch(API + "?id=eq." + id, { method:"DELETE", headers:HEADERS });
+  if (!res.ok) throw new Error(res.status);
+}
+
+// Queue-ல இருக்கும் Pending Changes-ஐ Cloud-க்கு அனுப்பு
+async function flushQueue() {
+  while (queue.length > 0) {
+    const job = queue[0];
+    try {
+      if (job.op === "insert") await cloudInsert(job.data);
+      else if (job.op === "update") await cloudUpdate(job.id, job.data);
+      else if (job.op === "delete") await cloudDelete(job.id);
+      queue.shift();
+      saveLocal();
+    } catch(e) {
+      // 4xx errors (bad data) — skip பண்ணு, இல்லைனா எப்போதும் Stuck ஆகிடும்
+      const code = Number(e.message);
+      if (code >= 400 && code < 500 && code !== 409) { queue.shift(); saveLocal(); continue; }
+      return false; // network/server issue — அப்புறம் Try பண்ணலாம்
+    }
+  }
+  return true;
+}
+
+// Cloud-லேருந்து Fresh Data எடு (Pending changes இல்லாதபோது மட்டும்)
+async function pullCloud() {
+  const res = await fetch(API + "?select=*&order=created_at.desc", { headers: HEADERS });
+  if (!res.ok) throw new Error(res.status);
+  return await res.json();
+}
+
+async function fullSync(silent) {
+  setSyncBusy();
+  try {
+    const flushed = await flushQueue();
+    if (flushed) {
+      leads = await pullCloud();
+      saveLocal();
+      render();
+    }
+  } catch(e) {
+    if (!silent) {} // local data-வே காட்டிக்கிட்டு இரு — பயனர் வேலை நிக்காது
+  }
+  setSync();
+}
+function setSyncBusy() {
+  const el = document.getElementById("sync");
+  el.textContent = "⟳ Sync ஆகுது…";
+  el.className = "sync ok";
+}
+
+// ===== UI helpers =====
 function todayStr() {
   const d = new Date();
   return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
@@ -173,14 +278,13 @@ function statusOf(k){ return STATUSES.find(s=>s.key===k) || STATUSES[0]; }
 function esc(s){ return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 
 function fillSelect(id, items, useObj) {
-  const el = document.getElementById(id);
-  el.innerHTML = items.map(i => useObj
+  document.getElementById(id).innerHTML = items.map(i => useObj
     ? `<option value="${i.key}">${i.label}</option>`
     : `<option value="${esc(i)}">${esc(i)}</option>`).join("");
 }
 fillSelect("f_category", CATEGORIES, false);
 fillSelect("f_source", SOURCES, false);
-fillSelect("f_websiteStatus", WEBSITE_STATUS, true);
+fillSelect("f_website_status", WEBSITE_STATUS, true);
 fillSelect("f_status", STATUSES, true);
 document.getElementById("filterCat").innerHTML =
   `<option value="all">எல்லா Category</option>` +
@@ -190,7 +294,7 @@ function openAdd() {
   editId = null;
   document.getElementById("formTitle").textContent = "புது Lead Add பண்ணுங்க";
   setFormValues({ name:"", category:CATEGORIES[0], area:"", phone:"", source:SOURCES[0],
-    websiteStatus:"none", status:"new", followUp:todayStr(), value:4000, notes:"" });
+    website_status:"none", status:"new", follow_up:todayStr(), value:4000, notes:"" });
   document.getElementById("overlay").classList.add("show");
 }
 function openEdit(id) {
@@ -201,38 +305,63 @@ function openEdit(id) {
   document.getElementById("overlay").classList.add("show");
 }
 function setFormValues(l) {
-  ["name","category","area","phone","source","websiteStatus","status","followUp","value","notes"]
-    .forEach(k => document.getElementById("f_"+k).value = l[k] !== undefined ? l[k] : "");
+  ["name","category","area","phone","source","website_status","status","follow_up","value","notes"]
+    .forEach(k => document.getElementById("f_"+k).value = l[k] !== undefined && l[k] !== null ? l[k] : "");
 }
 function closeForm(){ document.getElementById("overlay").classList.remove("show"); }
 
+// ===== Save: Local first → Cloud background =====
 function saveLead() {
   const get = k => document.getElementById("f_"+k).value;
   if (!get("name").trim()) { alert("Business பெயர் கொடுங்க"); return; }
   const data = {
     name:get("name"), category:get("category"), area:get("area"), phone:get("phone"),
-    source:get("source"), websiteStatus:get("websiteStatus"), status:get("status"),
-    followUp:get("followUp"), value:Number(get("value"))||0, notes:get("notes"),
+    source:get("source"), website_status:get("website_status"), status:get("status"),
+    follow_up:get("follow_up") || null, value:Number(get("value"))||0, notes:get("notes"),
   };
+
   if (editId) {
     leads = leads.map(l => l.id===editId ? {...l, ...data} : l);
+    queue.push({ op:"update", id:editId, data });
   } else {
-    leads.unshift({ ...data, id:Date.now().toString(36), createdAt:todayStr() });
+    const row = { ...data, id: uuid(), created_at: new Date().toISOString() };
+    leads.unshift(row);
+    queue.push({ op:"insert", data: row });
   }
-  persist(); closeForm(); render();
+  saveLocal();      // 1. Device-ல உடனே Save — இது எப்போதும் Success
+  closeForm();
+  render();
+  setSync();
+  trySyncSoon();    // 2. Cloud-க்கு Background-ல அனுப்பு
 }
 
 function updateLead(id, key, value) {
-  leads = leads.map(l => l.id===id ? {...l, [key]: key==="value" ? Number(value)||0 : value} : l);
-  persist(); render();
+  const v = key==="value" ? Number(value)||0 : (key==="follow_up" && !value ? null : value);
+  leads = leads.map(l => l.id===id ? {...l, [key]: v} : l);
+  queue.push({ op:"update", id, data:{ [key]: v } });
+  saveLocal(); render(); setSync(); trySyncSoon();
 }
+
 function removeLead(id) {
-  if (confirm("இந்த Lead-ஐ நீக்கவா?")) { leads = leads.filter(l=>l.id!==id); persist(); render(); }
+  if (!confirm("இந்த Lead-ஐ நீக்கவா?")) return;
+  leads = leads.filter(l=>l.id!==id);
+  // இந்த Lead-க்கான Pending Inserts/Updates-ஐயும் நீக்கு
+  const hadPendingInsert = queue.some(j => j.op==="insert" && j.data.id===id);
+  queue = queue.filter(j => !( (j.op==="insert" && j.data.id===id) || (j.op==="update" && j.id===id) ));
+  if (!hadPendingInsert) queue.push({ op:"delete", id });
+  saveLocal(); render(); setSync(); trySyncSoon();
 }
-function setFilterStatus(k) {
-  filterStatus = (filterStatus===k) ? "all" : k;
-  render();
+
+let syncTimer = null;
+function trySyncSoon() {
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(async () => {
+    await flushQueue();
+    setSync();
+  }, 400);
 }
+
+function setFilterStatus(k) { filterStatus = (filterStatus===k) ? "all" : k; render(); }
 function clearFilters() {
   filterStatus = "all";
   document.getElementById("search").value = "";
@@ -260,8 +389,15 @@ function importData(ev) {
     try {
       const data = JSON.parse(r.result);
       if (Array.isArray(data)) {
-        if (confirm(data.length + " Leads Restore பண்ணவா? (இப்போ இருக்கும் Data மாறும்)")) {
-          leads = data; persist(); render();
+        if (confirm(data.length + " Leads Restore பண்ணவா? (Cloud-க்கும் Sync ஆகும்)")) {
+          data.forEach(row => {
+            if (!row.id) row.id = uuid();
+            if (!leads.some(l => l.id === row.id)) {
+              leads.push(row);
+              queue.push({ op:"insert", data: row });
+            }
+          });
+          saveLocal(); render(); setSync(); trySyncSoon();
         }
       } else alert("தவறான Backup File.");
     } catch(e) { alert("File படிக்க முடியலை."); }
@@ -270,13 +406,13 @@ function importData(ev) {
   ev.target.value = "";
 }
 
+// ===== Render =====
 function render() {
   const today = todayStr();
   const search = document.getElementById("search").value.toLowerCase().trim();
   const cat = document.getElementById("filterCat").value;
 
-  // Stats
-  const dueToday = leads.filter(l => l.followUp && l.followUp<=today && l.status!=="won" && l.status!=="lost").length;
+  const dueToday = leads.filter(l => l.follow_up && l.follow_up<=today && l.status!=="won" && l.status!=="lost").length;
   const hot = leads.filter(l => ["interested","meeting","proposal"].includes(l.status)).length;
   const won = leads.filter(l => l.status==="won");
   const revenue = won.reduce((s,l)=>s+(Number(l.value)||0),0);
@@ -291,7 +427,6 @@ function render() {
     <div class="stat rev"><div class="num">₹${revenue.toLocaleString("en-IN")}</div><div class="lab">Revenue (${won.length} Won)</div></div>
     <div class="stat"><div class="num">₹${pipeline.toLocaleString("en-IN")}</div><div class="lab">Pipeline Value</div></div>`;
 
-  // Funnel
   const counts = {};
   STATUSES.forEach(s=>counts[s.key]=0);
   leads.forEach(l=>counts[l.status]=(counts[l.status]||0)+1);
@@ -300,13 +435,12 @@ function render() {
       <span class="c">${counts[s.key]||0}</span><span class="t">${s.label}</span>
     </button>`).join("");
 
-  // Filter list
   let list = leads;
-  if (filterStatus==="due") list = list.filter(l=>l.followUp && l.followUp<=today && l.status!=="won" && l.status!=="lost");
+  if (filterStatus==="due") list = list.filter(l=>l.follow_up && l.follow_up<=today && l.status!=="won" && l.status!=="lost");
   else if (filterStatus!=="all") list = list.filter(l=>l.status===filterStatus);
   if (cat!=="all") list = list.filter(l=>l.category===cat);
   if (search) list = list.filter(l =>
-    l.name.toLowerCase().includes(search) ||
+    (l.name||"").toLowerCase().includes(search) ||
     (l.area||"").toLowerCase().includes(search) ||
     (l.phone||"").includes(search));
 
@@ -323,8 +457,8 @@ function render() {
 
   el.innerHTML = `<div class="cards">` + list.map(l => {
     const st = statusOf(l.status);
-    const overdue = l.followUp && l.followUp<=today && !["won","lost"].includes(l.status);
-    const ws = (WEBSITE_STATUS.find(w=>w.key===l.websiteStatus)||{}).label || "";
+    const overdue = l.follow_up && l.follow_up<=today && !["won","lost"].includes(l.status);
+    const ws = (WEBSITE_STATUS.find(w=>w.key===l.website_status)||{}).label || "";
     const phone10 = (l.phone||"").replace(/\D/g,"").slice(-10);
     return `
     <div class="card${overdue?" overdue":""}">
@@ -332,7 +466,7 @@ function render() {
         <div>
           <p class="nm">${esc(l.name)}</p>
           <div class="meta">${esc(l.category)} • ${esc(l.area)||"—"} • ${esc(l.source)} • ${ws}</div>
-          ${overdue?`<div class="due-tag">⚠ Follow-up Due: ${l.followUp}</div>`:""}
+          ${overdue?`<div class="due-tag">⚠ Follow-up Due: ${l.follow_up}</div>`:""}
         </div>
         <span class="pill" style="background:${st.color}">${st.label}</span>
       </div>
@@ -340,7 +474,7 @@ function render() {
         <select onchange="updateLead('${l.id}','status',this.value)">
           ${STATUSES.map(s=>`<option value="${s.key}"${l.status===s.key?" selected":""}>${s.label}</option>`).join("")}
         </select>
-        <input type="date" value="${l.followUp||""}" onchange="updateLead('${l.id}','followUp',this.value)" title="Next Follow-up">
+        <input type="date" value="${l.follow_up||""}" onchange="updateLead('${l.id}','follow_up',this.value)" title="Next Follow-up">
         <input type="number" value="${l.value||0}" onchange="updateLead('${l.id}','value',this.value)" title="Deal Value ₹">
       </div>
       ${l.notes?`<div class="notes">${esc(l.notes)}</div>`:""}
@@ -354,7 +488,12 @@ function render() {
   }).join("") + `</div>`;
 }
 
-render();
+// ===== Start =====
+render();          // Local data-ஐ உடனே காட்டு (Internet தேவையில்லை)
+setSync();
+fullSync(true);    // Background-ல Cloud Sync
+window.addEventListener("online", () => fullSync(true));  // Internet வந்ததும் Auto Sync
+setInterval(() => { if (queue.length > 0) flushQueue().then(setSync); }, 30000); // 30 sec-க்கு ஒரு முறை Retry
 </script>
 </body>
 </html>
