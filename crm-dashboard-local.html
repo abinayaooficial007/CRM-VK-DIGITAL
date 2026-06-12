@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="ta">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lead CRM Dashboard</title>
+<style>
+  :root {
+    --bg: #F2F4F1; --card: #FFFFFF; --ink: #1C2B26; --muted: #6B7A74;
+    --line: #DDE3DF; --accent: #0E7C52; --accent-soft: #E2F2EA;
+    --warn: #B5772E; --warn-soft: #FBF0DF; --danger: #9A3B3B;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Noto Sans Tamil", "Noto Sans", -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--ink); margin: 0; padding: 16px;
+  }
+  .head { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:16px; flex-wrap:wrap; }
+  .head h1 { font-size:22px; margin:0; letter-spacing:-0.3px; }
+  .head p { margin:2px 0 0; font-size:12.5px; color:var(--muted); }
+  .btn { border:none; border-radius:10px; padding:10px 16px; font-size:14px; font-weight:600; cursor:pointer; font-family:inherit; }
+  .btn-primary { background:var(--accent); color:#fff; }
+  .btn-primary:hover { background:#0A6644; }
+  .btn-ghost { background:transparent; color:var(--muted); border:1px solid var(--line); }
+  .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin-bottom:14px; }
+  .stat { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
+  .stat .num { font-size:24px; font-weight:700; line-height:1.1; }
+  .stat .lab { font-size:12px; color:var(--muted); margin-top:3px; }
+  .stat.due { background:var(--warn-soft); border-color:#EAD3AE; cursor:pointer; }
+  .stat.due .num { color:var(--warn); }
+  .stat.rev .num { color:var(--accent); }
+  .funnel { display:flex; gap:4px; margin-bottom:14px; overflow-x:auto; padding-bottom:4px; }
+  .seg { flex:1; min-width:86px; border:none; border-radius:8px; padding:8px 6px; cursor:pointer; font-family:inherit; color:#fff; opacity:0.92; text-align:center; }
+  .seg.active { outline:3px solid var(--ink); opacity:1; }
+  .seg .c { font-size:17px; font-weight:700; display:block; }
+  .seg .t { font-size:10.5px; display:block; margin-top:1px; }
+  .toolbar { display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap; }
+  .toolbar input, .toolbar select {
+    padding:9px 12px; border:1px solid var(--line); border-radius:10px;
+    font-size:14px; font-family:inherit; background:var(--card); color:var(--ink);
+  }
+  .toolbar input { flex:1; min-width:160px; }
+  .empty { text-align:center; padding:48px 16px; color:var(--muted); background:var(--card); border:1px dashed var(--line); border-radius:14px; }
+  .empty b { color:var(--ink); }
+  .cards { display:flex; flex-direction:column; gap:10px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; }
+  .card.overdue { border-left:4px solid var(--warn); }
+  .row1 { display:flex; justify-content:space-between; gap:10px; align-items:flex-start; }
+  .nm { font-size:16px; font-weight:700; margin:0; }
+  .meta { font-size:12.5px; color:var(--muted); margin-top:2px; }
+  .pill { display:inline-block; font-size:11px; font-weight:600; padding:3px 9px; border-radius:999px; color:#fff; white-space:nowrap; }
+  .row2 { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; align-items:center; }
+  .row2 select, .row2 input[type=date], .row2 input[type=number] {
+    padding:7px 9px; border:1px solid var(--line); border-radius:8px; font-size:13px; font-family:inherit; background:#fff;
+  }
+  .row2 input[type=number] { width:96px; }
+  .acts { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
+  .act { font-size:13px; font-weight:600; padding:7px 12px; border-radius:8px; text-decoration:none; border:none; cursor:pointer; font-family:inherit; display:inline-block; }
+  .act.wa { background:var(--accent-soft); color:var(--accent); }
+  .act.call { background:#E7EEF6; color:#2E6FB5; }
+  .act.edit { background:#F0F0F0; color:var(--ink); }
+  .act.del { background:transparent; color:var(--danger); }
+  .notes { font-size:13px; color:var(--ink); background:#F7F8F6; border-radius:8px; padding:8px 10px; margin-top:10px; white-space:pre-wrap; }
+  .due-tag { font-size:11.5px; color:var(--warn); font-weight:700; }
+  .overlay { position:fixed; inset:0; background:rgba(20,30,26,0.45); display:none; align-items:center; justify-content:center; padding:16px; z-index:50; }
+  .overlay.show { display:flex; }
+  .modal { background:#fff; border-radius:16px; padding:20px; width:100%; max-width:460px; max-height:90vh; overflow-y:auto; }
+  .modal h2 { margin:0 0 14px; font-size:17px; }
+  .fld { margin-bottom:11px; }
+  .fld label { display:block; font-size:12px; font-weight:600; color:var(--muted); margin-bottom:4px; }
+  .fld input, .fld select, .fld textarea {
+    width:100%; padding:9px 11px; border:1px solid var(--line); border-radius:9px;
+    font-size:14px; font-family:inherit;
+  }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .modal .foot { display:flex; gap:10px; justify-content:flex-end; margin-top:6px; }
+  .backup-bar { display:flex; gap:8px; margin-top:18px; flex-wrap:wrap; justify-content:center; }
+  .backup-bar .btn { font-size:12.5px; padding:8px 12px; }
+  @media (max-width:480px){ .grid2 { grid-template-columns:1fr; } .head h1 { font-size:19px; } }
+</style>
+</head>
+<body>
+
+<div class="head">
+  <div>
+    <h1>Lead CRM Dashboard</h1>
+    <p>உங்க Client Acquisition System — தினமும் இங்கே தான் வேலை</p>
+  </div>
+  <button class="btn btn-primary" onclick="openAdd()">+ புது Lead</button>
+</div>
+
+<div class="stats" id="stats"></div>
+<div class="funnel" id="funnel"></div>
+
+<div class="toolbar">
+  <input id="search" placeholder="Search: பெயர், Area, Phone…" oninput="render()">
+  <select id="filterCat" onchange="render()"></select>
+  <button class="btn btn-ghost" id="clearBtn" style="display:none" onclick="clearFilters()">Clear</button>
+</div>
+
+<div id="list"></div>
+
+<div class="backup-bar">
+  <button class="btn btn-ghost" onclick="exportData()">⬇ Backup (Download JSON)</button>
+  <button class="btn btn-ghost" onclick="document.getElementById('importFile').click()">⬆ Restore Backup</button>
+  <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(event)">
+</div>
+
+<div class="overlay" id="overlay" onclick="if(event.target===this) closeForm()">
+  <div class="modal">
+    <h2 id="formTitle">புது Lead Add பண்ணுங்க</h2>
+    <div class="fld"><label>Business பெயர் *</label><input id="f_name" placeholder="உதா: Lakshmi Beauty Parlour"></div>
+    <div class="grid2">
+      <div class="fld"><label>Category</label><select id="f_category"></select></div>
+      <div class="fld"><label>Area</label><input id="f_area" placeholder="உதா: Saravanampatti"></div>
+    </div>
+    <div class="grid2">
+      <div class="fld"><label>Phone</label><input id="f_phone" placeholder="98XXXXXXXX"></div>
+      <div class="fld"><label>Source</label><select id="f_source"></select></div>
+    </div>
+    <div class="grid2">
+      <div class="fld"><label>Website நிலை</label><select id="f_websiteStatus"></select></div>
+      <div class="fld"><label>Deal Value (₹)</label><input id="f_value" type="number" value="4000"></div>
+    </div>
+    <div class="grid2">
+      <div class="fld"><label>Status</label><select id="f_status"></select></div>
+      <div class="fld"><label>Next Follow-up</label><input id="f_followUp" type="date"></div>
+    </div>
+    <div class="fld"><label>Notes</label><textarea id="f_notes" rows="3" placeholder="உதா: Owner பெயர் Kumar. Sample கேட்டார். Price பேசணும்."></textarea></div>
+    <div class="foot">
+      <button class="btn btn-ghost" onclick="closeForm()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveLead()">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const STATUSES = [
+  { key:"new", label:"புது Lead", color:"#5B6B7A" },
+  { key:"contacted", label:"Contacted", color:"#2E6FB5" },
+  { key:"interested", label:"Interested", color:"#B5772E" },
+  { key:"meeting", label:"Meeting", color:"#8A4FB5" },
+  { key:"proposal", label:"Proposal", color:"#B53E8A" },
+  { key:"won", label:"Won ✓", color:"#0E7C52" },
+  { key:"lost", label:"Lost", color:"#9A3B3B" },
+];
+const CATEGORIES = ["Salon / Beauty","Gym / Fitness","Real Estate","Construction","Interior Designer","Travel Agency","Photographer","Wedding Planner","Tuition Centre","Jewellery","Restaurant / Cafe","Doctor / Clinic","Lawyer","Other"];
+const SOURCES = ["Google Maps","Instagram","JustDial","Referral","Direct Visit","Facebook","Other"];
+const WEBSITE_STATUS = [
+  { key:"none", label:"Website இல்லை ⭐⭐⭐" },
+  { key:"fb_only", label:"FB/Insta மட்டும் ⭐⭐⭐" },
+  { key:"old", label:"பழைய Website ⭐⭐" },
+  { key:"has", label:"Website இருக்கு" },
+];
+const KEY = "freelancer-crm-leads";
+
+let leads = [];
+let editId = null;
+let filterStatus = "all";
+
+try { leads = JSON.parse(localStorage.getItem(KEY) || "[]"); } catch(e) { leads = []; }
+
+function persist() {
+  try { localStorage.setItem(KEY, JSON.stringify(leads)); }
+  catch(e) { alert("Save ஆகலை — Browser Storage Full ஆக இருக்கலாம்."); }
+}
+
+function todayStr() {
+  const d = new Date();
+  return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+}
+function statusOf(k){ return STATUSES.find(s=>s.key===k) || STATUSES[0]; }
+function esc(s){ return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+
+function fillSelect(id, items, useObj) {
+  const el = document.getElementById(id);
+  el.innerHTML = items.map(i => useObj
+    ? `<option value="${i.key}">${i.label}</option>`
+    : `<option value="${esc(i)}">${esc(i)}</option>`).join("");
+}
+fillSelect("f_category", CATEGORIES, false);
+fillSelect("f_source", SOURCES, false);
+fillSelect("f_websiteStatus", WEBSITE_STATUS, true);
+fillSelect("f_status", STATUSES, true);
+document.getElementById("filterCat").innerHTML =
+  `<option value="all">எல்லா Category</option>` +
+  CATEGORIES.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join("");
+
+function openAdd() {
+  editId = null;
+  document.getElementById("formTitle").textContent = "புது Lead Add பண்ணுங்க";
+  setFormValues({ name:"", category:CATEGORIES[0], area:"", phone:"", source:SOURCES[0],
+    websiteStatus:"none", status:"new", followUp:todayStr(), value:4000, notes:"" });
+  document.getElementById("overlay").classList.add("show");
+}
+function openEdit(id) {
+  const l = leads.find(x=>x.id===id); if(!l) return;
+  editId = id;
+  document.getElementById("formTitle").textContent = "Lead Edit";
+  setFormValues(l);
+  document.getElementById("overlay").classList.add("show");
+}
+function setFormValues(l) {
+  ["name","category","area","phone","source","websiteStatus","status","followUp","value","notes"]
+    .forEach(k => document.getElementById("f_"+k).value = l[k] !== undefined ? l[k] : "");
+}
+function closeForm(){ document.getElementById("overlay").classList.remove("show"); }
+
+function saveLead() {
+  const get = k => document.getElementById("f_"+k).value;
+  if (!get("name").trim()) { alert("Business பெயர் கொடுங்க"); return; }
+  const data = {
+    name:get("name"), category:get("category"), area:get("area"), phone:get("phone"),
+    source:get("source"), websiteStatus:get("websiteStatus"), status:get("status"),
+    followUp:get("followUp"), value:Number(get("value"))||0, notes:get("notes"),
+  };
+  if (editId) {
+    leads = leads.map(l => l.id===editId ? {...l, ...data} : l);
+  } else {
+    leads.unshift({ ...data, id:Date.now().toString(36), createdAt:todayStr() });
+  }
+  persist(); closeForm(); render();
+}
+
+function updateLead(id, key, value) {
+  leads = leads.map(l => l.id===id ? {...l, [key]: key==="value" ? Number(value)||0 : value} : l);
+  persist(); render();
+}
+function removeLead(id) {
+  if (confirm("இந்த Lead-ஐ நீக்கவா?")) { leads = leads.filter(l=>l.id!==id); persist(); render(); }
+}
+function setFilterStatus(k) {
+  filterStatus = (filterStatus===k) ? "all" : k;
+  render();
+}
+function clearFilters() {
+  filterStatus = "all";
+  document.getElementById("search").value = "";
+  document.getElementById("filterCat").value = "all";
+  render();
+}
+
+function waLink(l) {
+  const num = (l.phone||"").replace(/\D/g,"");
+  const full = num.length===10 ? "91"+num : num;
+  return "https://wa.me/" + full + "?text=" + encodeURIComponent("வணக்கம்! " + l.name + " பற்றி பேச விரும்புகிறேன்.");
+}
+
+function exportData() {
+  const blob = new Blob([JSON.stringify(leads, null, 2)], {type:"application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "crm-backup-" + todayStr() + ".json";
+  a.click();
+}
+function importData(ev) {
+  const file = ev.target.files[0]; if(!file) return;
+  const r = new FileReader();
+  r.onload = () => {
+    try {
+      const data = JSON.parse(r.result);
+      if (Array.isArray(data)) {
+        if (confirm(data.length + " Leads Restore பண்ணவா? (இப்போ இருக்கும் Data மாறும்)")) {
+          leads = data; persist(); render();
+        }
+      } else alert("தவறான Backup File.");
+    } catch(e) { alert("File படிக்க முடியலை."); }
+  };
+  r.readAsText(file);
+  ev.target.value = "";
+}
+
+function render() {
+  const today = todayStr();
+  const search = document.getElementById("search").value.toLowerCase().trim();
+  const cat = document.getElementById("filterCat").value;
+
+  // Stats
+  const dueToday = leads.filter(l => l.followUp && l.followUp<=today && l.status!=="won" && l.status!=="lost").length;
+  const hot = leads.filter(l => ["interested","meeting","proposal"].includes(l.status)).length;
+  const won = leads.filter(l => l.status==="won");
+  const revenue = won.reduce((s,l)=>s+(Number(l.value)||0),0);
+  const pipeline = leads.filter(l=>["interested","meeting","proposal"].includes(l.status))
+    .reduce((s,l)=>s+(Number(l.value)||0),0);
+
+  document.getElementById("stats").innerHTML = `
+    <div class="stat due" onclick="setFilterStatus('due')" title="Click பண்ணி இன்றைய follow-ups பாருங்க">
+      <div class="num">${dueToday}</div><div class="lab">இன்றைய Follow-ups 🔔</div></div>
+    <div class="stat"><div class="num">${leads.length}</div><div class="lab">மொத்த Leads</div></div>
+    <div class="stat"><div class="num">${hot}</div><div class="lab">Hot Leads 🔥</div></div>
+    <div class="stat rev"><div class="num">₹${revenue.toLocaleString("en-IN")}</div><div class="lab">Revenue (${won.length} Won)</div></div>
+    <div class="stat"><div class="num">₹${pipeline.toLocaleString("en-IN")}</div><div class="lab">Pipeline Value</div></div>`;
+
+  // Funnel
+  const counts = {};
+  STATUSES.forEach(s=>counts[s.key]=0);
+  leads.forEach(l=>counts[l.status]=(counts[l.status]||0)+1);
+  document.getElementById("funnel").innerHTML = STATUSES.map(s => `
+    <button class="seg${filterStatus===s.key?" active":""}" style="background:${s.color}" onclick="setFilterStatus('${s.key}')">
+      <span class="c">${counts[s.key]||0}</span><span class="t">${s.label}</span>
+    </button>`).join("");
+
+  // Filter list
+  let list = leads;
+  if (filterStatus==="due") list = list.filter(l=>l.followUp && l.followUp<=today && l.status!=="won" && l.status!=="lost");
+  else if (filterStatus!=="all") list = list.filter(l=>l.status===filterStatus);
+  if (cat!=="all") list = list.filter(l=>l.category===cat);
+  if (search) list = list.filter(l =>
+    l.name.toLowerCase().includes(search) ||
+    (l.area||"").toLowerCase().includes(search) ||
+    (l.phone||"").includes(search));
+
+  document.getElementById("clearBtn").style.display =
+    (filterStatus!=="all" || cat!=="all" || search) ? "inline-block" : "none";
+
+  const el = document.getElementById("list");
+  if (list.length===0) {
+    el.innerHTML = `<div class="empty">${leads.length===0
+      ? `<b>இன்னும் Leads இல்லை.</b><br>Google Maps-ல கண்டுபிடிச்ச முதல் Business-ஐ "+ புது Lead" Button-ல Add பண்ணுங்க!`
+      : `இந்த Filter-ல Leads இல்லை.`}</div>`;
+    return;
+  }
+
+  el.innerHTML = `<div class="cards">` + list.map(l => {
+    const st = statusOf(l.status);
+    const overdue = l.followUp && l.followUp<=today && !["won","lost"].includes(l.status);
+    const ws = (WEBSITE_STATUS.find(w=>w.key===l.websiteStatus)||{}).label || "";
+    const phone10 = (l.phone||"").replace(/\D/g,"").slice(-10);
+    return `
+    <div class="card${overdue?" overdue":""}">
+      <div class="row1">
+        <div>
+          <p class="nm">${esc(l.name)}</p>
+          <div class="meta">${esc(l.category)} • ${esc(l.area)||"—"} • ${esc(l.source)} • ${ws}</div>
+          ${overdue?`<div class="due-tag">⚠ Follow-up Due: ${l.followUp}</div>`:""}
+        </div>
+        <span class="pill" style="background:${st.color}">${st.label}</span>
+      </div>
+      <div class="row2">
+        <select onchange="updateLead('${l.id}','status',this.value)">
+          ${STATUSES.map(s=>`<option value="${s.key}"${l.status===s.key?" selected":""}>${s.label}</option>`).join("")}
+        </select>
+        <input type="date" value="${l.followUp||""}" onchange="updateLead('${l.id}','followUp',this.value)" title="Next Follow-up">
+        <input type="number" value="${l.value||0}" onchange="updateLead('${l.id}','value',this.value)" title="Deal Value ₹">
+      </div>
+      ${l.notes?`<div class="notes">${esc(l.notes)}</div>`:""}
+      <div class="acts">
+        ${l.phone?`<a class="act wa" href="${waLink(l)}" target="_blank" rel="noreferrer">WhatsApp</a>
+        <a class="act call" href="tel:+91${phone10}">Call</a>`:""}
+        <button class="act edit" onclick="openEdit('${l.id}')">Edit</button>
+        <button class="act del" onclick="removeLead('${l.id}')">Delete</button>
+      </div>
+    </div>`;
+  }).join("") + `</div>`;
+}
+
+render();
+</script>
+</body>
+</html>
